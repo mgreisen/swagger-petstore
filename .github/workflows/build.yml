@@ -1,0 +1,59 @@
+
+name: 'Build and Fuzz'
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-and-deploy:
+    name: 'Build and Fuzz Tasks'
+    runs-on: ubuntu-latest
+    
+    steps:
+
+    - name: Checkout code to Runner
+      uses: actions/checkout@v2
+
+    - name: Set up JDK 1.8
+      uses: actions/setup-java@v1
+      with:
+        java-version: 1.8
+    - name: Build with Maven
+      run: mvn -B package --file pom.xml
+       
+      # Setup python since we use RAFT's python CLI'
+    - name: Setup Python
+      uses: actions/setup-python@v2
+      with:
+        python-version: '3.8'
+
+    - name: 'Build and push image'
+      uses: azure/docker-login@v1
+      with:
+        login-server: ${{ secrets.REGISTRY_LOGIN_SERVER }}
+        username: ${{ secrets.REGISTRY_USERNAME }}
+        password: ${{ secrets.REGISTRY_PASSWORD }}
+    - run: |
+        docker build . -t ${{ secrets.REGISTRY_LOGIN_SERVER }}/petstore:demo
+        docker push ${{ secrets.REGISTRY_LOGIN_SERVER }}/petstore:demo
+
+      # Run the raft command to fuzz locally
+    - name: Run RAFT
+      uses: microsoft/raft-action@v3.2
+      with:
+        # Mode tells the action we want to run using our raft local script
+        mode: local
+
+        # The raft cli command arguments. 
+        # In this example the URL is kept in a secret because this is a public repo.
+        # In this example the URL points to a logic app which creates a github issue.
+        # You can use any URL that accepts a POST method to process the webhook. 
+        arguments: 'job create --file raft-fuzz/run.json --bugFoundWebhookUrl ${{ secrets.BUG_FOUND_URL }}'
+
+      # Save the local logs into the pipeline artifacts for
+      # access to raw bug buckets and postman collections.
+    - name: Archive logs
+      uses: actions/upload-artifact@v2
+      with: 
+          name: tool-logs
+          path: .raft
